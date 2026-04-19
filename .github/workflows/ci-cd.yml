@@ -11,7 +11,6 @@ env:
   ORG: ${{ github.repository_owner }}
 
 jobs:
-  # ── Lint ────────────────────────────────────────────────────────────────────
   lint-backend:
     name: Lint Backend
     runs-on: ubuntu-latest
@@ -56,16 +55,25 @@ jobs:
         with:
           python-version: '3.12'
       - run: pip install flake8
-      - run: flake8 src/ --max-line-length=120 --ignore=E501,W503,E302,E303,E305
+      - run: flake8 src/ --max-line-length=120 --ignore=E501,W503
 
-  # ── Tests ───────────────────────────────────────────────────────────────────
   test-backend:
     name: Test Backend
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: backend
+    services:
+      mongodb:
+        image: mongo:7.0
+        ports: ['27017:27017']
+        options: >-
+          --health-cmd "mongosh --eval \"db.adminCommand('ping')\""
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     env:
+      MONGODB_URI_TEST: mongodb://localhost:27017/ai_task_platform_test
       JWT_SECRET: test_secret_for_ci_only_32_characters_xyz
       NODE_ENV: test
     steps:
@@ -76,7 +84,7 @@ jobs:
           cache: 'npm'
           cache-dependency-path: backend/package-lock.json
       - run: npm ci
-      - run: npm test
+      - run: npm test -- --forceExit
 
   test-worker:
     name: Test Worker (Python)
@@ -92,7 +100,6 @@ jobs:
       - run: pip install -r requirements.txt
       - run: python -m pytest tests/ -v --tb=short
 
-  # ── Build & Push ─────────────────────────────────────────────────────────────
   build-and-push:
     name: Build & Push Docker Images
     runs-on: ubuntu-latest
@@ -114,12 +121,10 @@ jobs:
         id: tags
         run: |
           SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-8)
-          ORG_LOWER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
           echo "short_sha=${SHORT_SHA}" >> $GITHUB_OUTPUT
           echo "backend_tag=${SHORT_SHA}"  >> $GITHUB_OUTPUT
           echo "frontend_tag=${SHORT_SHA}" >> $GITHUB_OUTPUT
           echo "worker_tag=${SHORT_SHA}"   >> $GITHUB_OUTPUT
-          echo "org_lower=${ORG_LOWER}"    >> $GITHUB_OUTPUT
 
       - name: Login to GitHub Container Registry
         uses: docker/login-action@v3
@@ -139,8 +144,8 @@ jobs:
           target: production
           push: true
           tags: |
-            ${{ env.REGISTRY }}/${{ steps.tags.outputs.org_lower }}/neuralq-backend:${{ steps.tags.outputs.short_sha }}
-            ${{ env.REGISTRY }}/${{ steps.tags.outputs.org_lower }}/neuralq-backend:latest
+            ${{ env.REGISTRY }}/${{ env.ORG }}/neuralq-backend:${{ steps.tags.outputs.short_sha }}
+            ${{ env.REGISTRY }}/${{ env.ORG }}/neuralq-backend:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -152,8 +157,8 @@ jobs:
           target: production
           push: true
           tags: |
-            ${{ env.REGISTRY }}/${{ steps.tags.outputs.org_lower }}/neuralq-frontend:${{ steps.tags.outputs.short_sha }}
-            ${{ env.REGISTRY }}/${{ steps.tags.outputs.org_lower }}/neuralq-frontend:latest
+            ${{ env.REGISTRY }}/${{ env.ORG }}/neuralq-frontend:${{ steps.tags.outputs.short_sha }}
+            ${{ env.REGISTRY }}/${{ env.ORG }}/neuralq-frontend:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -165,12 +170,11 @@ jobs:
           target: production
           push: true
           tags: |
-            ${{ env.REGISTRY }}/${{ steps.tags.outputs.org_lower }}/neuralq-worker:${{ steps.tags.outputs.short_sha }}
-            ${{ env.REGISTRY }}/${{ steps.tags.outputs.org_lower }}/neuralq-worker:latest
+            ${{ env.REGISTRY }}/${{ env.ORG }}/neuralq-worker:${{ steps.tags.outputs.short_sha }}
+            ${{ env.REGISTRY }}/${{ env.ORG }}/neuralq-worker:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  # ── Update Infra Manifests ───────────────────────────────────────────────────
   update-manifests:
     name: Update K8s Image Tags
     runs-on: ubuntu-latest
@@ -180,25 +184,30 @@ jobs:
       contents: write
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout INFRA repo
+        uses: actions/checkout@v4
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          repository: Harshsharma00109/ai-task-platform-infra
+          token: ${{ secrets.INFRA_REPO_TOKEN }}
+          path: infra-repo
 
       - name: Update image tags in kustomization
         env:
           SHA: ${{ needs.build-and-push.outputs.short_sha }}
         run: |
+          cd infra-repo
           sed -i "s/newTag: \"BACKEND_IMAGE_TAG\"/newTag: \"${SHA}\"/" \
-            infra/k8s/overlays/production/kustomization.yaml
+            k8s/overlays/production/kustomization.yaml
           sed -i "s/newTag: \"WORKER_IMAGE_TAG\"/newTag: \"${SHA}\"/" \
-            infra/k8s/overlays/production/kustomization.yaml
+            k8s/overlays/production/kustomization.yaml
           sed -i "s/newTag: \"FRONTEND_IMAGE_TAG\"/newTag: \"${SHA}\"/" \
-            infra/k8s/overlays/production/kustomization.yaml
+            k8s/overlays/production/kustomization.yaml
 
-      - name: Commit and push manifest updates
+      - name: Commit and push to infra repo
         run: |
+          cd infra-repo
           git config --global user.name  "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git add infra/k8s/overlays/production/kustomization.yaml
+          git add k8s/overlays/production/kustomization.yaml
           git diff --staged --quiet || git commit -m "ci: update image tags to ${{ needs.build-and-push.outputs.short_sha }} [skip ci]"
           git push
