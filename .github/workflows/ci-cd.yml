@@ -56,8 +56,6 @@ jobs:
         with:
           python-version: '3.12'
       - run: pip install flake8
-      # E501=line too long (already covered by max-line-length), W503=line break before operator
-      # E302/E303=blank lines — often triggered by auto-formatters, safe to ignore in CI
       - run: flake8 src/ --max-line-length=120 --ignore=E501,W503,E302,E303,E305
 
   # ── Tests ───────────────────────────────────────────────────────────────────
@@ -67,7 +65,6 @@ jobs:
     defaults:
       run:
         working-directory: backend
-    # No MongoDB service needed — tests use mongodb-memory-server
     env:
       JWT_SECRET: test_secret_for_ci_only_32_characters_xyz
       NODE_ENV: test
@@ -117,10 +114,12 @@ jobs:
         id: tags
         run: |
           SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-8)
+          ORG_LOWER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
           echo "short_sha=${SHORT_SHA}" >> $GITHUB_OUTPUT
           echo "backend_tag=${SHORT_SHA}"  >> $GITHUB_OUTPUT
           echo "frontend_tag=${SHORT_SHA}" >> $GITHUB_OUTPUT
           echo "worker_tag=${SHORT_SHA}"   >> $GITHUB_OUTPUT
+          echo "org_lower=${ORG_LOWER}"    >> $GITHUB_OUTPUT
 
       - name: Login to GitHub Container Registry
         uses: docker/login-action@v3
@@ -140,8 +139,8 @@ jobs:
           target: production
           push: true
           tags: |
-            ${{ env.REGISTRY }}/${{ env.ORG }}/neuralq-backend:${{ steps.tags.outputs.short_sha }}
-            ${{ env.REGISTRY }}/${{ env.ORG }}/neuralq-backend:latest
+            ${{ env.REGISTRY }}/${{ steps.tags.outputs.org_lower }}/neuralq-backend:${{ steps.tags.outputs.short_sha }}
+            ${{ env.REGISTRY }}/${{ steps.tags.outputs.org_lower }}/neuralq-backend:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -153,8 +152,8 @@ jobs:
           target: production
           push: true
           tags: |
-            ${{ env.REGISTRY }}/${{ env.ORG }}/neuralq-frontend:${{ steps.tags.outputs.short_sha }}
-            ${{ env.REGISTRY }}/${{ env.ORG }}/neuralq-frontend:latest
+            ${{ env.REGISTRY }}/${{ steps.tags.outputs.org_lower }}/neuralq-frontend:${{ steps.tags.outputs.short_sha }}
+            ${{ env.REGISTRY }}/${{ steps.tags.outputs.org_lower }}/neuralq-frontend:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -166,8 +165,8 @@ jobs:
           target: production
           push: true
           tags: |
-            ${{ env.REGISTRY }}/${{ env.ORG }}/neuralq-worker:${{ steps.tags.outputs.short_sha }}
-            ${{ env.REGISTRY }}/${{ env.ORG }}/neuralq-worker:latest
+            ${{ env.REGISTRY }}/${{ steps.tags.outputs.org_lower }}/neuralq-worker:${{ steps.tags.outputs.short_sha }}
+            ${{ env.REGISTRY }}/${{ steps.tags.outputs.org_lower }}/neuralq-worker:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
