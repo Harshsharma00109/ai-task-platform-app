@@ -28,15 +28,18 @@ function createRedisClient() {
 }
 
 async function connectRedis() {
+  if (process.env.NODE_ENV === 'test') return;
   redisClient = createRedisClient();
   await redisClient.connect();
 }
 
 function getRedisClient() {
+  if (process.env.NODE_ENV === 'test') return null;
   return redisClient;
 }
 
 function getRedisConnection() {
+  if (process.env.NODE_ENV === 'test') return null;
   // BullMQ requires a separate connection instance
   return new Redis({
     host: process.env.REDIS_HOST || 'localhost',
