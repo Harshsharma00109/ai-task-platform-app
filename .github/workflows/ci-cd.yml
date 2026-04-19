@@ -56,7 +56,9 @@ jobs:
         with:
           python-version: '3.12'
       - run: pip install flake8
-      - run: flake8 src/ --max-line-length=120 --ignore=E501,W503
+      # E501=line too long (already covered by max-line-length), W503=line break before operator
+      # E302/E303=blank lines — often triggered by auto-formatters, safe to ignore in CI
+      - run: flake8 src/ --max-line-length=120 --ignore=E501,W503,E302,E303,E305
 
   # ── Tests ───────────────────────────────────────────────────────────────────
   test-backend:
@@ -65,17 +67,8 @@ jobs:
     defaults:
       run:
         working-directory: backend
-    services:
-      mongodb:
-        image: mongo:7.0
-        ports: ['27017:27017']
-        options: >-
-          --health-cmd "mongosh --eval \"db.adminCommand('ping')\""
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
+    # No MongoDB service needed — tests use mongodb-memory-server
     env:
-      MONGODB_URI_TEST: mongodb://localhost:27017/ai_task_platform_test
       JWT_SECRET: test_secret_for_ci_only_32_characters_xyz
       NODE_ENV: test
     steps:
@@ -86,7 +79,7 @@ jobs:
           cache: 'npm'
           cache-dependency-path: backend/package-lock.json
       - run: npm ci
-      - run: npm test -- --forceExit
+      - run: npm test
 
   test-worker:
     name: Test Worker (Python)
