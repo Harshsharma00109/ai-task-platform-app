@@ -92,7 +92,7 @@ taskSchema.index({ jobId: 1 }, { sparse: true });
 
 // Virtual: duration label
 taskSchema.virtual('duration').get(function () {
-  if (this.processingTimeMs == null) return null;
+  if (this.processingTimeMs === null) return null;
   return `${this.processingTimeMs}ms`;
 });
 
