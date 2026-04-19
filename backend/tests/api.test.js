@@ -3,11 +3,12 @@
 /**
  * Integration tests for Auth and Task API endpoints.
  * Run with: npm test
- * Requires a running MongoDB instance (set MONGODB_URI_TEST in env).
+ * Uses mongodb-memory-server — no external MongoDB required.
  */
 
 const request = require('supertest');
 const mongoose = require('mongoose');
+const { MongoMemoryServer } = require('mongodb-memory-server');
 const app = require('../src/app');
 const User = require('../src/models/user.model');
 const Task = require('../src/models/task.model');
@@ -21,20 +22,23 @@ const TEST_USER = {
 
 let authToken = '';
 let createdTaskId = '';
+let mongod;
 
 beforeAll(async () => {
-  const uri = process.env.MONGODB_URI_TEST || 'mongodb://localhost:27017/ai_task_platform_test';
+  mongod = await MongoMemoryServer.create();
+  const uri = mongod.getUri();
   await mongoose.connect(uri);
   // Clean test data
   await User.deleteMany({ email: TEST_USER.email });
   await Task.deleteMany({});
-});
+}, 30000);
 
 afterAll(async () => {
   await User.deleteMany({ email: TEST_USER.email });
   await Task.deleteMany({});
   await mongoose.connection.close();
-});
+  await mongod.stop();
+}, 30000);
 
 // ── Auth Tests ────────────────────────────────────────────────────────────────
 describe('POST /api/auth/register', () => {
