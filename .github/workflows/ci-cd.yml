@@ -1,0 +1,212 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+env:
+  REGISTRY: ghcr.io
+  ORG: ${{ github.repository_owner }}
+
+jobs:
+  # ── Lint ────────────────────────────────────────────────────────────────────
+  lint-backend:
+    name: Lint Backend
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+
+  lint-frontend:
+    name: Lint Frontend
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+
+  lint-worker:
+    name: Lint Worker (Python)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: worker
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install flake8
+      - run: flake8 src/ --max-line-length=120 --ignore=E501,W503
+
+  # ── Tests ───────────────────────────────────────────────────────────────────
+  test-backend:
+    name: Test Backend
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    services:
+      mongodb:
+        image: mongo:7.0
+        ports: ['27017:27017']
+        options: >-
+          --health-cmd "mongosh --eval \"db.adminCommand('ping')\""
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      MONGODB_URI_TEST: mongodb://localhost:27017/ai_task_platform_test
+      JWT_SECRET: test_secret_for_ci_only_32_characters_xyz
+      NODE_ENV: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+      - run: npm test -- --forceExit
+
+  test-worker:
+    name: Test Worker (Python)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: worker
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt
+      - run: python -m pytest tests/ -v --tb=short
+
+  # ── Build & Push ─────────────────────────────────────────────────────────────
+  build-and-push:
+    name: Build & Push Docker Images
+    runs-on: ubuntu-latest
+    needs: [lint-backend, lint-frontend, lint-worker, test-backend, test-worker]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    permissions:
+      contents: write
+      packages: write
+    outputs:
+      backend_tag:  ${{ steps.tags.outputs.backend_tag }}
+      frontend_tag: ${{ steps.tags.outputs.frontend_tag }}
+      worker_tag:   ${{ steps.tags.outputs.worker_tag }}
+      short_sha:    ${{ steps.tags.outputs.short_sha }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Generate image tags
+        id: tags
+        run: |
+          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-8)
+          echo "short_sha=${SHORT_SHA}" >> $GITHUB_OUTPUT
+          echo "backend_tag=${SHORT_SHA}"  >> $GITHUB_OUTPUT
+          echo "frontend_tag=${SHORT_SHA}" >> $GITHUB_OUTPUT
+          echo "worker_tag=${SHORT_SHA}"   >> $GITHUB_OUTPUT
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build & push backend
+        uses: docker/build-push-action@v5
+        with:
+          context: ./backend
+          file: ./backend/Dockerfile
+          target: production
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.ORG }}/neuralq-backend:${{ steps.tags.outputs.short_sha }}
+            ${{ env.REGISTRY }}/${{ env.ORG }}/neuralq-backend:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build & push frontend
+        uses: docker/build-push-action@v5
+        with:
+          context: ./frontend
+          file: ./frontend/Dockerfile
+          target: production
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.ORG }}/neuralq-frontend:${{ steps.tags.outputs.short_sha }}
+            ${{ env.REGISTRY }}/${{ env.ORG }}/neuralq-frontend:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build & push worker
+        uses: docker/build-push-action@v5
+        with:
+          context: ./worker
+          file: ./worker/Dockerfile
+          target: production
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.ORG }}/neuralq-worker:${{ steps.tags.outputs.short_sha }}
+            ${{ env.REGISTRY }}/${{ env.ORG }}/neuralq-worker:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ── Update Infra Manifests ───────────────────────────────────────────────────
+  update-manifests:
+    name: Update K8s Image Tags
+    runs-on: ubuntu-latest
+    needs: build-and-push
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Update image tags in kustomization
+        env:
+          SHA: ${{ needs.build-and-push.outputs.short_sha }}
+        run: |
+          sed -i "s/newTag: \"BACKEND_IMAGE_TAG\"/newTag: \"${SHA}\"/" \
+            infra/k8s/overlays/production/kustomization.yaml
+          sed -i "s/newTag: \"WORKER_IMAGE_TAG\"/newTag: \"${SHA}\"/" \
+            infra/k8s/overlays/production/kustomization.yaml
+          sed -i "s/newTag: \"FRONTEND_IMAGE_TAG\"/newTag: \"${SHA}\"/" \
+            infra/k8s/overlays/production/kustomization.yaml
+
+      - name: Commit and push manifest updates
+        run: |
+          git config --global user.name  "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add infra/k8s/overlays/production/kustomization.yaml
+          git diff --staged --quiet || git commit -m "ci: update image tags to ${{ needs.build-and-push.outputs.short_sha }} [skip ci]"
+          git push

@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: neuralq
+  labels:
+    app.kubernetes.io/name: neuralq
+    environment: production

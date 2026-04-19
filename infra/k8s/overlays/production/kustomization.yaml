@@ -1,0 +1,19 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+bases:
+  - ../../base
+
+namespace: neuralq
+
+patchesStrategicMerge:
+  - backend-patch.yaml
+  - worker-patch.yaml
+
+images:
+  - name: ghcr.io/YOUR_ORG/neuralq-backend
+    newTag: "BACKEND_IMAGE_TAG"   # replaced by CI/CD
+  - name: ghcr.io/YOUR_ORG/neuralq-worker
+    newTag: "WORKER_IMAGE_TAG"
+  - name: ghcr.io/YOUR_ORG/neuralq-frontend
+    newTag: "FRONTEND_IMAGE_TAG"
