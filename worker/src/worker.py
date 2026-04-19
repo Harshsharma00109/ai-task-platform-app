@@ -5,11 +5,9 @@ Supports multiple replicas running concurrently.
 """
 
 import os
-import sys
 import json
 import time
 import signal
-import asyncio
 from datetime import datetime, timezone
 
 import redis
@@ -175,13 +173,13 @@ def update_task_success(db, task_id: str, result: str, logs: list, processing_ms
     now = datetime.now(timezone.utc)
     log_entries = [
         {
-            "timestamp": datetime.fromisoformat(l["timestamp"].replace("Z", "+00:00"))
-            if isinstance(l["timestamp"], str)
-            else l["timestamp"],
-            "level": l["level"],
-            "message": l["message"],
+            "timestamp": datetime.fromisoformat(entry["timestamp"].replace("Z", "+00:00"))
+            if isinstance(entry["timestamp"], str)
+            else entry["timestamp"],
+            "level": entry["level"],
+            "message": entry["message"],
         }
-        for l in logs
+        for entry in logs
     ]
     db.tasks.update_one(
         {"_id": ObjectId(task_id)},
