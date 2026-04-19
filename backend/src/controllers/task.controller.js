@@ -1,5 +1,6 @@
 'use strict';
 
+const mongoose = require('mongoose');
 const Task = require('../models/task.model');
 const { enqueueTask } = require('../services/queue.service');
 const { sendSuccess, sendError, sendPaginated } = require('../utils/response');
@@ -19,7 +20,7 @@ async function createTask(req, res, next) {
       logs: [{ level: 'info', message: 'Task created and queued for processing.' }],
     });
 
-    // Enqueue to Redis via BullMQ
+    // Enqueue to Redis via BullMQ (skipped in test mode)
     const job = await enqueueTask(task._id, {
       title: task.title,
       inputText: task.inputText,
@@ -54,7 +55,6 @@ async function getTasks(req, res, next) {
     const limitNum = Math.min(100, Math.max(1, parseInt(limit)));
     const skip = (pageNum - 1) * limitNum;
 
-    // Build filter
     const filter = { userId };
     if (status && status !== 'all') filter.status = status;
     if (search) {
@@ -97,6 +97,10 @@ async function getTasks(req, res, next) {
 
 async function getTaskById(req, res, next) {
   try {
+    // Validate ObjectId format — must return 400 not 422
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return sendError(res, 'Invalid task ID', 400);
+    }
     const task = await Task.findOne({ _id: req.params.id, userId: req.user._id });
     if (!task) return sendError(res, 'Task not found', 404);
     return sendSuccess(res, { task }, 'Task retrieved');
@@ -107,6 +111,10 @@ async function getTaskById(req, res, next) {
 
 async function deleteTask(req, res, next) {
   try {
+    // Validate ObjectId format — must return 400 not 422
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return sendError(res, 'Invalid task ID', 400);
+    }
     const task = await Task.findOneAndDelete({ _id: req.params.id, userId: req.user._id });
     if (!task) return sendError(res, 'Task not found', 404);
     logger.info(`Task deleted: ${req.params.id} by user ${req.user._id}`);
@@ -118,6 +126,9 @@ async function deleteTask(req, res, next) {
 
 async function retryTask(req, res, next) {
   try {
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return sendError(res, 'Invalid task ID', 400);
+    }
     const task = await Task.findOne({ _id: req.params.id, userId: req.user._id });
     if (!task) return sendError(res, 'Task not found', 404);
 
