@@ -79,7 +79,7 @@ export default function DashboardPage() {
           <h1 className="font-display text-2xl lg:text-3xl font-bold text-white">
             {greeting}, {user?.name?.split(' ')[0]} 👋
           </h1>
-          <p className="text-gray-500 text-sm mt-1">Here's what's happening with your tasks.</p>
+          <p className="text-gray-500 text-sm mt-1">Here&apos;s what&apos;s happening with your tasks.</p>
         </div>
         <Link to="/tasks" className="btn-primary">
           <Plus className="w-4 h-4" /> New Task
