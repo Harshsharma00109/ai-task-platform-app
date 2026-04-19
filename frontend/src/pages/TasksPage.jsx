@@ -154,7 +154,7 @@ function TaskDetailDrawer({ task, onClose }) {
 
   let parsedResult = null;
   if (task.operation === 'word_count' && task.result) {
-    try { parsedResult = JSON.parse(task.result); } catch (_) {}
+    try { parsedResult = JSON.parse(task.result); }  catch(e){ parsedResult = null; }
   }
 
   return (
